@@ -1,2 +1,197 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Buffer Handle Auto-Tagger</title></head>
-<body style="font-family:system-ui;padding:40px"><h1>Buffer Handle Auto-Tagger</h1><p>Coming soon.</p></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Handle Auto-Tagger for Buffer</title>
+  <meta name="description" content="Builds a directory of every @handle you've tagged in Buffer, then tags new posts for each network automatically.">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="/" aria-label="Handle Auto-Tagger home">
+      <span class="mark" aria-hidden="true">@</span>
+      <span class="brand-name">Handle Auto&#8209;Tagger <em>for Buffer</em></span>
+    </a>
+    <div class="account" id="account" hidden>
+      <label class="org">
+        <span class="sr">Organization</span>
+        <select id="org"></select>
+      </label>
+      <span class="who" id="who"></span>
+      <button class="link" id="logout" type="button">Disconnect</button>
+    </div>
+  </header>
+
+  <div class="flash" id="flash" role="status" hidden></div>
+
+  <!-- Signed out -->
+  <main id="welcome" class="welcome" hidden>
+    <section class="hero">
+      <p class="eyebrow">Stop looking up handles</p>
+      <h1>Type the name.<br><span class="hl">Get the right @ on every network.</span></h1>
+      <p class="lede">Handle Auto&#8209;Tagger reads the posts you've already sent through Buffer, finds every account you've tagged, and matches each one across X, Instagram, Facebook, Threads, LinkedIn and more. Then you write <b>Ole Miss</b>, and each channel gets its own handle.</p>
+      <a class="btn primary big" href="/auth/login">Connect Buffer</a>
+      <p class="fine">Read-only access to your past posts, plus permission to add the posts you compose. Your handle directory is kept in this browser. <a href="/privacy">Privacy</a></p>
+    </section>
+    <ol class="how">
+      <li><span class="n">1</span><h3>Scan</h3><p>Up to a year of sent posts, across all your channels, in a handful of requests.</p></li>
+      <li><span class="n">2</span><h3>Match</h3><p>Cross-posted captions reveal which X handle, Instagram account and Facebook page belong together.</p></li>
+      <li><span class="n">3</span><h3>Compose</h3><p>Write once with plain names. Review each network's version, then send it to your Buffer queue.</p></li>
+    </ol>
+    <figure class="demo" aria-label="Example">
+      <div class="demo-in"><span class="lbl">You type</span><p>Big weekend: <u>LSU</u> heads to <u>Ole Miss</u> for a top-10 series.</p></div>
+      <div class="demo-out">
+        <div><span class="net x">X</span><p>Big weekend: <mark>@LSUBaseball</mark> heads to <mark>@OleMissBSB</mark> for a top-10 series.</p></div>
+        <div><span class="net instagram">Instagram</span><p>Big weekend: <mark>@lsubaseball</mark> heads to <mark>@olemissbsb</mark> for a top-10 series.</p></div>
+        <div><span class="net facebook">Facebook</span><p>Big weekend: <mark>LSU Baseball</mark> heads to <mark>Ole Miss Baseball</mark> for a top-10 series.</p></div>
+      </div>
+    </figure>
+  </main>
+
+  <!-- Signed in -->
+  <main id="app" class="app" hidden>
+    <nav class="steps" role="tablist" aria-label="Steps">
+      <button role="tab" data-view="scan" id="tab-scan"><span>1</span>Scan</button>
+      <button role="tab" data-view="directory" id="tab-directory"><span>2</span>Directory <i class="count" id="dir-count"></i></button>
+      <button role="tab" data-view="compose" id="tab-compose"><span>3</span>Compose</button>
+    </nav>
+
+    <!-- SCAN -->
+    <section class="view" id="view-scan" role="tabpanel" aria-labelledby="tab-scan" hidden>
+      <div class="panel">
+        <div class="panel-h">
+          <div>
+            <h2>Scan your sent posts</h2>
+            <p class="muted">Pick the channels to learn from. Facebook pages are matched to their X and Instagram handles through posts you cross-posted.</p>
+          </div>
+        </div>
+        <div class="channels" id="scan-channels"></div>
+        <div class="row gap">
+          <label class="field inline">How far back
+            <select id="scan-months">
+              <option value="3">3 months</option>
+              <option value="6">6 months</option>
+              <option value="12" selected>12 months</option>
+            </select>
+          </label>
+          <button class="btn primary" id="scan-start" type="button">Scan posts</button>
+          <button class="btn ghost" id="scan-stop" type="button" hidden>Stop</button>
+        </div>
+        <div class="progress" id="scan-progress" hidden>
+          <div class="bar"><i id="scan-bar"></i></div>
+          <div class="ticker">
+            <span><b id="p-posts">0</b> posts read</span>
+            <span><b id="p-handles">0</b> handles found</span>
+            <span><b id="p-req">0</b> API requests</span>
+            <span id="p-quota" class="muted"></span>
+          </div>
+          <p class="muted small" id="scan-status"></p>
+        </div>
+      </div>
+      <p class="muted small last-scan" id="last-scan"></p>
+    </section>
+
+    <!-- DIRECTORY -->
+    <section class="view" id="view-directory" role="tabpanel" aria-labelledby="tab-directory" hidden>
+      <div class="stats" id="dir-stats"></div>
+      <div class="panel">
+        <div class="panel-h">
+          <div>
+            <h2>Your handle directory</h2>
+            <p class="muted">Names are suggestions from the handles. Rename anything to what you'd actually type, and add aliases like <i>Ole Miss, Rebels</i>.</p>
+          </div>
+          <div class="row gap">
+            <button class="btn ghost" id="dir-add" type="button">Add account</button>
+            <button class="btn ghost" id="dir-export" type="button">Export CSV</button>
+          </div>
+        </div>
+        <div class="row gap filters">
+          <input type="search" id="dir-q" placeholder="Search names or handles" aria-label="Search directory">
+          <div class="chips" id="dir-filters">
+            <button class="chip on" data-f="all" type="button">All</button>
+            <button class="chip" data-f="linked" type="button">On 2+ networks</button>
+            <button class="chip" data-f="unnamed" type="button">Needs a name</button>
+            <button class="chip" data-f="conflicts" type="button">Possible mis-tags</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="dir">
+            <thead id="dir-head"></thead>
+            <tbody id="dir-rows"></tbody>
+          </table>
+        </div>
+        <div class="row center"><button class="btn ghost" id="dir-more" type="button" hidden>Show more</button></div>
+        <div class="empty" id="dir-empty" hidden>
+          <p><b>No handles yet.</b> Run a scan, or add accounts by hand.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- COMPOSE -->
+    <section class="view" id="view-compose" role="tabpanel" aria-labelledby="tab-compose" hidden>
+      <div class="compose-grid">
+        <div class="panel composer">
+          <div class="panel-h"><h2>Write once</h2>
+            <label class="toggle"><input type="checkbox" id="match-case"> Match capitalization</label>
+          </div>
+          <div class="ta-wrap">
+            <textarea id="caption" rows="7" placeholder="Type names the way you'd say them: LSU heads to Ole Miss this weekend…" spellcheck="true"></textarea>
+            <ul class="suggest" id="suggest" role="listbox" hidden></ul>
+          </div>
+          <div class="chips tagged" id="tagged"></div>
+          <p class="hint muted small">Start typing a name, or <kbd>@</kbd> plus a few letters, to pick from your directory. <kbd>Tab</kbd> or <kbd>Enter</kbd> accepts. Click a tag to leave it as plain text.</p>
+
+          <div class="send-opts">
+            <div class="seg" role="radiogroup" aria-label="When to post">
+              <label><input type="radio" name="when" value="queue" checked><span>Add to queue</span></label>
+              <label><input type="radio" name="when" value="schedule"><span>Schedule</span></label>
+              <label><input type="radio" name="when" value="draft"><span>Save as draft</span></label>
+            </div>
+            <input type="datetime-local" id="due" hidden aria-label="Date and time">
+            <label class="field">Image or video URL <span class="muted">(optional, needed for Instagram)</span>
+              <input type="url" id="media" placeholder="https://…">
+            </label>
+          </div>
+        </div>
+
+        <div class="outputs">
+          <div class="panel-h slim">
+            <h2>Each network's version</h2>
+            <div class="chips" id="pick-channels" aria-label="Channels to post to"></div>
+          </div>
+          <div class="out-list" id="outs"></div>
+          <div class="send-bar">
+            <span class="muted small" id="send-summary"></span>
+            <button class="btn primary" id="send" type="button" disabled>Send to Buffer</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="edit-dialog">
+    <form method="dialog" id="edit-form">
+      <h3 id="edit-title">Add account</h3>
+      <label class="field">Name <input name="name" required></label>
+      <label class="field">Aliases <span class="muted">(comma separated)</span><input name="aliases"></label>
+      <div id="edit-handles"></div>
+      <div class="row gap end">
+        <button class="btn ghost" value="cancel" formnovalidate>Cancel</button>
+        <button class="btn primary" value="save">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <footer class="foot">
+    <span>Built for Buffer Commit 2026 by <a href="https://onfirstagency.com" rel="noopener">On First Agency</a>. Not an official Buffer product.</span>
+    <a href="/privacy">Privacy</a>
+  </footer>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

@@ -3,5 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=20" }
+  "description": "Buffer Handle Auto-Tagger: builds a social handle directory from your past Buffer posts and tags new posts for every network.",
+  "scripts": {
+    "test": "node --test",
+    "lint": "node --check api/index.js && node --check lib/app.js && node --check lib/buffer.js && node --check lib/config.js && node --check lib/session.js && node --check public/app.js && node --check public/engine.js"
+  },
+  "engines": { "node": "22.x" },
+  "dependencies": {
+    "express": "^4.21.2",
+    "iron-session": "^9.0.1"
+  }
 }

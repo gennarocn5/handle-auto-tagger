@@ -1,0 +1,6 @@
+# Never upload local secrets (the TLS key, .env, the development session key),
+# and let the platform install dependencies.
+certs/
+node_modules/
+.env
+.session-key
