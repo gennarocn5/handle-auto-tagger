@@ -243,14 +243,43 @@ const NO_VOCAB = { isGeneric: () => false, denominator: (core) => core.length, s
 // "baseball", "bsb", "state"; for a music brand it'd be "music", "records".
 // A word is generic when it shows up inside many of the handles you tag.
 export function handleVocabulary(raws) {
-  const cores = [...new Set(raws.filter((h) => h && !isBracket(h)).map((h) => letters(h.replace(/^@/, '').split('@')[0])))].filter((c) => c.length >= 3)
+  const plain = [...new Set(raws.filter((h) => h && !isBracket(h)).map((h) => h.replace(/^@/, '').split('@')[0]))]
+  const cores = [...new Set(plain.map(letters))].filter((c) => c.length >= 3)
   const threshold = Math.max(3, Math.ceil(cores.length * 0.04))
   const suffixCount = new Map()
   for (const c of cores) for (let L = 3; L <= 10 && L <= c.length - 2; L++) {
     const x = c.slice(-L)
     suffixCount.set(x, (suffixCount.get(x) || 0) + 1)
   }
-  const suffixes = [...suffixCount].filter(([, n]) => n >= threshold).map(([x]) => x).sort((a, b) => b.length - a.length)
+  // Does an ending start a word? Mixed-case handles tell us: TexasBaseball
+  // capitalizes the B of "baseball", nobody capitalizes the s of "sbaseball".
+  const boundary = new Map() // suffix → [starts a word, seen]
+  for (const h of plain) {
+    if (h === h.toLowerCase() || h === h.toUpperCase()) continue
+    const raw = h.replace(/[^A-Za-z0-9_.-]/g, '')
+    for (let L = 3; L <= 10 && L <= raw.length - 2; L++) {
+      const at = raw.length - L
+      const x = raw.slice(at).toLowerCase()
+      if (!/^[a-z0-9]+$/.test(x)) continue
+      const sep = /[_.-]/.test(raw[at - 1])
+      const upper = /[A-Z]/.test(raw[at])
+      // a capital right after another capital (LSU|Baseball, NU|baseball) is ambiguous: skip it
+      if (!sep && upper && /[A-Z]/.test(raw[at - 1])) continue
+      const b = boundary.get(x) || [0, 0]
+      b[1]++
+      if (sep || upper) b[0]++
+      boundary.set(x, b)
+    }
+  }
+  const startsWord = (x, n) => {
+    const b = boundary.get(x)
+    if (b && b[1] >= 2) return b[0] / b[1] >= 0.5
+    return x.length === 3 || n / (suffixCount.get(x.slice(1)) || n) >= 0.6
+  }
+  const suffixes = [...suffixCount]
+    .filter(([x, n]) => n >= threshold && startsWord(x, n))
+    .map(([x]) => x)
+    .sort((a, b) => b.length - a.length)
   const cache = new Map()
   const isGeneric = (w) => {
     if (w.length < 3) return false

@@ -176,3 +176,12 @@ test('rejects partial and accidental names', async () => {
   assert.equal(n('Missouri State takes game one. @MoStateBSB', '@MoStateBSB'), undefined)
   assert.equal(n('LSU wins. @LSUBaseball', '@LSUBaseball'), 'LSU')
 })
+
+test('handle fallback splits on whole-word endings', async () => {
+  const { handleVocabulary, nameFromHandle } = await import('../public/engine.js')
+  const vocab = handleVocabulary(['@CanesBaseball', '@TexasBaseball', '@HokiesBaseball', '@HuskersBaseball', '@GoNUbaseball', '@MizzouBaseball', '@LSUBaseball', '@UKBaseball', '@AuburnBaseball', '@ucdavisbaseball'])
+  assert.equal(nameFromHandle('@CanesBaseball', vocab), 'Canes Baseball')
+  assert.equal(nameFromHandle('@GoNUbaseball', vocab), 'Go NU Baseball')
+  assert.equal(nameFromHandle('@MizzouBaseball', vocab), 'Mizzou Baseball')
+  assert.equal(nameFromHandle('@ucdavisbaseball', vocab), 'Ucdavis Baseball')
+})
