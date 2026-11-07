@@ -133,10 +133,17 @@ export function nameFromHandle(raw, vocab = null) {
   if (h.includes('.') && /\.(bsky\.social|com|org|net|io|co)$/i.test(h)) h = h.split('.')[0]
   if (vocab?.suffixes?.length) {
     const lower = h.toLowerCase()
-    // longest shared suffix; if it already starts with a capital, camel-case splitting handles it
-    const suf = vocab.suffixes.find((x) => lower.endsWith(x) && lower.length - x.length >= 2)
-    const at = suf ? h.length - suf.length : -1
-    if (suf && !/[A-Z_.\-]/.test(h[at]) && !/[_.\-]/.test(h[at - 1])) h = `${h.slice(0, at)} ${h.slice(at)}`
+    // Split before the longest shared ending written all in lowercase
+    // ("ucdavis|baseball", "GoNU|baseball"). Endings with capitals are left to
+    // the camel-case split below ("Mizzou|Baseball", not "Mizzo|uBaseball").
+    for (const x of vocab.suffixes) {
+      if (!lower.endsWith(x) || lower.length - x.length < 2) continue
+      const at = h.length - x.length
+      if (h.slice(at) !== x) continue
+      if (/[_.\-]/.test(h[at - 1])) break
+      h = `${h.slice(0, at)} ${h.slice(at)}`
+      break
+    }
   }
   h = h
     .replace(/[_.\-]+/g, ' ')
