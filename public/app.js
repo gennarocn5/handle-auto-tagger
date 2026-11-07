@@ -285,8 +285,8 @@ function renderDirectory() {
   $('#dir-head').innerHTML = `<tr><th>Name</th><th>Aliases</th>${fams.map((f) => `<th>${esc(FAMILY_LABEL[f] || f)}</th>`).join('')}<th class="num">Tagged</th><th></th></tr>`
   const list = filtered()
   $('#dir-rows').innerHTML = list.slice(0, S.shown).map((e) => `
-    <tr data-id="${esc(e.id)}" class="${e.needsName ? 'suggested' : ''}">
-      <td class="name"><input value="${esc(e.name)}" data-k="name" aria-label="Name" title="${e.needsName ? 'Suggested from the handle. Edit to confirm.' : ''}">${e.unnamed ? '<span class="badge new">needs a name</span>' : ''}${conflictBadge(e)}</td>
+    <tr data-id="${esc(e.id)}" class="${!e.userNamed && e.nameSource !== 'captions' ? 'suggested' : ''}">
+      <td class="name"><input value="${esc(e.name)}" data-k="name" aria-label="Name" title="${e.userNamed ? 'Your name' : e.nameSource === 'captions' ? 'Found next to this tag in your captions. Edit to change.' : 'Guessed from the handle. Edit to confirm.'}">${e.unnamed ? '<span class="badge new">needs a name</span>' : ''}${conflictBadge(e)}</td>
       <td class="al"><input value="${esc((e.aliases || []).join(', '))}" data-k="aliases" placeholder="add aliases" aria-label="Aliases"></td>
       ${fams.map((f) => `<td class="h">${e.handles[f] ? esc(displayHandle(e.handles[f])) : '<span class="none">—</span>'}</td>`).join('')}
       <td class="num" title="${e.lastUsed ? 'Last tagged ' + new Date(e.lastUsed).toLocaleDateString() : ''}">${fmt(e.total || 0)}</td>
@@ -317,7 +317,7 @@ function onDirInput(ev) {
   if (input.dataset.k === 'name') {
     const v = input.value.trim()
     if (!v) return
-    e.name = v; e.needsName = false; e.unnamed = false
+    e.name = v; e.needsName = false; e.unnamed = false; e.userNamed = true; e.nameSource = 'user'
     input.closest('tr').classList.remove('suggested')
   } else {
     e.aliases = input.value.split(',').map((s) => s.trim()).filter(Boolean)
@@ -361,9 +361,9 @@ function openEditor(e = null) {
     if (e) {
       const edited = { ...(e.editedHandles || {}) }
       for (const f of fams) if ((handles[f] || '') !== (e.handles[f] || '')) edited[f] = handles[f]
-      Object.assign(e, { name, aliases, handles, editedHandles: edited, needsName: false, unnamed: false })
+      Object.assign(e, { name, aliases, handles, editedHandles: edited, needsName: false, unnamed: false, userNamed: name !== e.name || e.userNamed, nameSource: name !== e.name || e.userNamed ? 'user' : e.nameSource })
     } else {
-      S.dir.entities.unshift({ id: `m${Date.now().toString(36)}`, name, aliases, handles, editedHandles: handles, counts: {}, keys: [], total: 0, lastUsed: null, conflicts: [], source: 'manual', needsName: false })
+      S.dir.entities.unshift({ id: `m${Date.now().toString(36)}`, name, aliases, handles, editedHandles: handles, counts: {}, keys: [], total: 0, lastUsed: null, conflicts: [], source: 'manual', needsName: false, userNamed: true, nameSource: 'user' })
     }
     saveDir(); renderDirectory()
   }

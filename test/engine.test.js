@@ -55,7 +55,7 @@ test('links one account across networks from cross-posts', () => {
 
   const usa = entities.find((e) => e.handles.x === '@SouthAlabamaBSB')
   assert.equal(usa.handles.facebook, '@[111111111111111]')
-  assert.equal(usa.name, 'South Alabama BSB')
+  assert.equal(usa.name, 'South Alabama')
 
   const lsu = entities.find((e) => e.handles.x === '@LSUBaseball')
   const om = entities.find((e) => e.handles.x === '@OleMissBSB')
@@ -112,7 +112,7 @@ test('autocomplete matches names, aliases and handles', () => {
 test('rescans keep user edits', () => {
   const first = buildDirectory(posts, channels).entities
   const ku = first.find((e) => e.handles.x === '@KUBaseball')
-  ku.name = 'Kansas'; ku.needsName = false; ku.aliases = ['KU']
+  ku.name = 'Kansas'; ku.userNamed = true; ku.aliases = ['KU']
   const merged = mergeDirectory(first, buildDirectory(posts, channels).entities)
   const again = merged.find((e) => e.handles.x === '@KUBaseball')
   assert.equal(again.name, 'Kansas')
@@ -126,4 +126,27 @@ test('helpers', () => {
   assert.equal(monthWindows(12).length, 12)
   const csv = toCSV(buildDirectory(posts, channels).entities, ['x', 'facebook'])
   assert.match(csv.split('\n')[0], /^Name,Aliases,X,Facebook/)
+})
+
+test('names come from the captions, not just the handle', async () => {
+  const { nameFromCaptions } = await import('../public/engine.js')
+  const n = (texts, handles) => nameFromCaptions(texts, handles)?.name
+  assert.equal(n(['🆕 2025 Fall Report: South Alabama\n\n@SouthAlabamaBSB’s roster looks improved this fall.'], ['@SouthAlabamaBSB']), 'South Alabama')
+  assert.equal(n(['Big weekend in the SEC. LSU heads to Ole Miss. @LSUBaseball @OleMissBSB'], ['@LSUBaseball', '@lsubaseball']), 'LSU')
+  assert.equal(n(['Big weekend in the SEC. LSU heads to Ole Miss. @LSUBaseball @OleMissBSB'], ['@OleMissBSB']), 'Ole Miss')
+  assert.equal(n(['Congrats to Chris Burke (@ChrisBurke02) on the new gig!'], ['@ChrisBurke02']), 'Chris Burke')
+  assert.equal(n(['Huge series win for Vanderbilt this weekend. @VandyBoys', 'Vanderbilt rolls again @VandyBoys'], ['@VandyBoys']), 'Vanderbilt')
+  assert.equal(n(['Thanks to our partners at Turtlebox Audio for the support! @TurtleboxAudio'], ['@TurtleboxAudio']), 'Turtlebox Audio')
+  // no phrase explains the handle → no name (falls back to splitting the handle)
+  assert.equal(n(['Huge night for the Bearcats! @GoBearcatsBASE'], ['@GoBearcatsBASE']), 'Bearcats')
+  assert.equal(n(['What a win tonight in Omaha! @AggieBaseball'], ['@AggieBaseball']), undefined)
+  // the account's own capitalized words elsewhere in the caption don't leak in
+  assert.equal(n(['The Big Ten opener: Ohio State hosts Michigan. @OhioStateBASE'], ['@OhioStateBASE']), 'Ohio State')
+})
+
+test('scanned directory uses caption names', () => {
+  const { entities } = buildDirectory(posts, channels)
+  assert.equal(entities.find((e) => e.handles.x === '@SouthAlabamaBSB').name, 'South Alabama')
+  assert.equal(entities.find((e) => e.handles.x === '@SouthAlabamaBSB').nameSource, 'captions')
+  assert.equal(entities.find((e) => e.handles.x === '@KUBaseball').nameSource, 'handle')
 })

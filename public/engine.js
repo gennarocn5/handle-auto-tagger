@@ -139,6 +139,118 @@ export function nameFromHandle(raw) {
   return h.split(' ').map((w) => (w === w.toLowerCase() ? w.charAt(0).toUpperCase() + w.slice(1) : w)).join(' ')
 }
 
+/* ------------------------------------------------------- names from captions */
+
+// People usually write the account's name right next to its tag:
+//   "Fall Report: South Alabama … @SouthAlabamaBSB's roster"
+//   "Congrats to Chris Burke (@ChrisBurke02)"
+// So instead of splitting the handle, look in the captions where the handle
+// was used for a capitalized phrase whose words spell out part of the handle,
+// in order. "South Alabama" covers 12 letters of "southalabamabsb"; "LSU" is an
+// acronym at the start of "lsubaseball". The phrase that explains the most of
+// the handle, most often, wins.
+
+const CONNECTORS = new Set(['of', 'and', '&', 'de', 'la', 'del', 'da', 'du', 'van', 'von', 'the'])
+const STOP_STARTS = new Set(['the', 'a', 'an', 'and', 'of'])
+
+function phraseRuns(text) {
+  const clean = (text || '')
+    .normalize('NFKC')
+    .replace(URL_RE, ' | ')
+    .replace(BRACKET, ' | ')
+    .replace(/[@#][\w.]+/g, ' | ')
+  const runs = []
+  let run = []
+  const flush = () => { if (run.length) runs.push(run); run = [] }
+  for (const raw of clean.split(/\s+/)) {
+    if (!raw) continue
+    const lead = /^[("“'‘\[]/.test(raw)
+    if (lead) flush()
+    let w = raw.replace(/^[("“'‘\[]+/, '')
+    const trail = /[)"”'’\],.:;!?|…–—/]+$/.test(w.replace(/['’]s$/i, ''))
+    w = w.replace(/['’]s$/i, '').replace(/[)"”'’\],.:;!?|…–—/]+$/, '').replace(/['’]s$/i, '')
+    if (!w) { flush(); continue }
+    const capital = /^[\p{Lu}\d]/u.test(w) && /[\p{L}]/u.test(w)
+    if (capital || (run.length && CONNECTORS.has(w.toLowerCase()))) run.push(w)
+    else flush()
+    if (trail) flush()
+  }
+  flush()
+  // trim connectors from the ends
+  return runs.map((r) => {
+    while (r.length && CONNECTORS.has(r[0].toLowerCase())) r.shift()
+    while (r.length && CONNECTORS.has(r[r.length - 1].toLowerCase())) r.pop()
+    return r
+  }).filter((r) => r.length)
+}
+
+const letters = (s) => s.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]/g, '')
+
+// How many letters of `core` (a handle, lowercased, letters only) this phrase
+// accounts for, or 0 if any word in it doesn't belong.
+export function phraseScore(words, core) {
+  let pos = 0, matched = 0
+  const significant = words.filter((w) => !CONNECTORS.has(w.toLowerCase()))
+  if (!significant.length || STOP_STARTS.has(words[0].toLowerCase())) return 0
+  for (const w of words) {
+    const lw = letters(w)
+    if (!lw) continue
+    if (CONNECTORS.has(w.toLowerCase())) { const at = core.indexOf(lw, pos); if (at >= 0) { pos = at + lw.length; matched += lw.length } continue }
+    const at = core.indexOf(lw, pos)
+    if (at < 0) {
+      // "Vanderbilt" for @VandyBoys: a single word whose first 4+ letters open the handle
+      if (words.length === 1 && lw.length >= 5) {
+        let k = 0
+        while (k < lw.length && k < core.length && lw[k] === core[k]) k++
+        if (k >= 4) return k * 0.5
+      }
+      return 0
+    }
+    pos = at + lw.length
+    matched += lw.length
+  }
+  const isAcronym = words.length === 1 && /^[\p{Lu}\d&]{2,6}$/u.test(words[0])
+  if (matched >= 4 && matched / core.length >= 0.3) return matched
+  if (isAcronym && core.startsWith(letters(words[0]))) return Math.max(matched, 3.5)
+  return 0
+}
+
+export function nameFromCaptions(texts, handles) {
+  const cores = [...new Set(handles
+    .filter((h) => h && !isBracket(h))
+    .map((h) => letters(h.replace(/^@/, '').split('@')[0])))]
+    .filter((c) => c.length >= 3)
+  if (!cores.length || !texts.length) return null
+  const votes = new Map() // lowercased phrase → { score, forms: Map(original → n) }
+  for (const text of texts) {
+    const seenHere = new Map()
+    for (const run of phraseRuns(text)) {
+      for (let i = 0; i < run.length; i++) {
+        for (let j = i + 1; j <= Math.min(run.length, i + 5); j++) {
+          const words = run.slice(i, j)
+          const score = Math.max(...cores.map((c) => phraseScore(words, c)))
+          if (!score) continue
+          const phrase = words.join(' ')
+          const k = phrase.toLowerCase()
+          if ((seenHere.get(k) || 0) < score) seenHere.set(k, score)
+          if (!votes.has(k)) votes.set(k, { score: 0, forms: new Map() })
+          const v = votes.get(k)
+          v.forms.set(phrase, (v.forms.get(phrase) || 0) + 1)
+        }
+      }
+    }
+    for (const [k, score] of seenHere) votes.get(k).score += score
+  }
+  let best = null
+  for (const [k, v] of votes) {
+    if (!best || v.score > best.v.score || (v.score === best.v.score && k.length > best.k.length)) best = { k, v }
+  }
+  if (!best) return null
+  let form = null, n = -1
+  for (const [f, c] of best.v.forms) if (c > n) { form = f; n = c }
+  return { name: form, score: best.v.score }
+}
+
 /* -------------------------------------------------------------- directory */
 
 // posts:    [{ id, text, dueAt, createdAt, channelId }]
@@ -159,8 +271,9 @@ export function buildDirectory(posts, channels, { linkWindowSeconds = 180, dueWi
     const when = Date.parse(p.dueAt || p.createdAt) || 0
     for (const m of mentions) {
       let node = nodes.get(m.key)
-      if (!node) nodes.set(m.key, node = { key: m.key, family, variants: new Map(), count: 0, lastUsed: 0, posts: 0 })
+      if (!node) nodes.set(m.key, node = { key: m.key, family, variants: new Map(), count: 0, lastUsed: 0, posts: 0, texts: [] })
       node.count++
+      if (node.texts.length < 25 && !node.texts.includes(p.text)) node.texts.push(p.text)
       node.variants.set(m.raw, (node.variants.get(m.raw) || 0) + 1)
       if (when > node.lastUsed) node.lastUsed = when
     }
@@ -259,11 +372,13 @@ export function buildDirectory(posts, channels, { linkWindowSeconds = 180, dueWi
       total += n.count
       lastUsed = Math.max(lastUsed, n.lastUsed)
     }
+    const fromCaptions = nameFromCaptions(members.flatMap((n) => n.texts), Object.values(handles))
     const nameHandle = FAMILY_ORDER.map((f) => handles[f]).find((h) => h && nameFromHandle(h))
-    const name = nameHandle ? nameFromHandle(nameHandle) : ''
+    const name = fromCaptions?.name || (nameHandle ? nameFromHandle(nameHandle) : '')
     const entity = {
       id: stableId(keys),
       name: name || `${FAMILY_LABEL[members[0].family] || members[0].family} account ${shortRaw(handles[members[0].family])}`,
+      nameSource: fromCaptions ? 'captions' : name ? 'handle' : 'none',
       needsName: true, // every scanned name is a suggestion until the user confirms it
       unnamed: !name,
       aliases: [],
@@ -376,9 +491,11 @@ export function mergeDirectory(previous, fresh) {
     out.push({
       ...e,
       id: old.id,
-      name: old.needsName ? e.name : old.name,
-      needsName: old.needsName && e.needsName,
-      unnamed: old.needsName ? e.unnamed : false,
+      name: old.userNamed ? old.name : e.name,
+      nameSource: old.userNamed ? 'user' : e.nameSource,
+      userNamed: Boolean(old.userNamed),
+      needsName: old.userNamed ? false : e.needsName,
+      unnamed: old.userNamed ? false : e.unnamed,
       aliases: old.aliases || [],
       handles: { ...e.handles, ...(old.editedHandles || {}) },
       editedHandles: old.editedHandles || {},
