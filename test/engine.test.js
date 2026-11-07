@@ -150,3 +150,15 @@ test('scanned directory uses caption names', () => {
   assert.equal(entities.find((e) => e.handles.x === '@SouthAlabamaBSB').nameSource, 'captions')
   assert.equal(entities.find((e) => e.handles.x === '@KUBaseball').nameSource, 'handle')
 })
+
+test('words most of your handles share never become a name', async () => {
+  const { nameFromCaptions, handleVocabulary, nameFromHandle } = await import('../public/engine.js')
+  const vocab = handleVocabulary(['@OU_Baseball', '@TexasBaseball', '@UKBaseball', '@AuburnBaseball', '@CanesBaseball', '@HailStateBB', '@MoStateBSB', '@TxStateBaseball', '@OleMissBSB', '@AlabamaBSB', '@GatorsBB'])
+  assert.equal(nameFromCaptions(['College Baseball is back! @OU_Baseball'], ['@OU_Baseball'], vocab), null)
+  assert.equal(nameFromCaptions(['Big night for State. @HailStateBB'], ['@HailStateBB'], vocab), null)
+  assert.equal(nameFromCaptions(['Oklahoma rolls. @OU_Baseball'], ['@OU_Baseball'], vocab), null)
+  assert.equal(nameFromCaptions(['Texas wins the series. @TexasBaseball'], ['@TexasBaseball'], vocab)?.name, 'Texas')
+  assert.equal(nameFromCaptions(['Miami walks it off! @CanesBaseball'], ['@CanesBaseball'], vocab), null)
+  assert.equal(nameFromHandle('@ucdavisbaseball', vocab), 'Ucdavis Baseball')
+  assert.equal(nameFromHandle('@AuburnBaseball', vocab), 'Auburn Baseball')
+})

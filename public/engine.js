@@ -75,8 +75,9 @@ export function extractMentions(text, service) {
     found.push({ raw: m[0], index: m.index, end: m.index + m[0].length })
     taken.push([m.index, m.index + m[0].length])
   }
-  const re = new RegExp(PLAIN[family] || PLAIN.other)
-  for (const m of text.matchAll(re)) {
+  // On Facebook a typed "@Name" is just text; only Buffer's @[page] form tags.
+  const re = family === 'facebook' ? null : new RegExp(PLAIN[family] || PLAIN.other)
+  for (const m of re ? text.matchAll(re) : []) {
     const index = m.index
     if (taken.some(([a, b]) => index >= a && index < b)) continue
     found.push({ raw: `@${m[1]}`, index, end: index + m[0].length })
@@ -120,7 +121,7 @@ function contextWords(text, mention, side, n = 4) {
 }
 
 // "SouthAlabamaBSB" → "South Alabama BSB", "fiu.baseball" → "Fiu Baseball"
-export function nameFromHandle(raw) {
+export function nameFromHandle(raw, vocab = null) {
   if (!raw) return ''
   if (isBracket(raw)) {
     const named = raw.match(/^@\[([^\]]+)\]\(/)
@@ -130,6 +131,13 @@ export function nameFromHandle(raw) {
   }
   let h = raw.replace(/^@/, '').replace(/@.*$/, '')
   if (h.includes('.') && /\.(bsky\.social|com|org|net|io|co)$/i.test(h)) h = h.split('.')[0]
+  if (vocab?.suffixes?.length) {
+    const lower = h.toLowerCase()
+    // longest shared suffix; if it already starts with a capital, camel-case splitting handles it
+    const suf = vocab.suffixes.find((x) => lower.endsWith(x) && lower.length - x.length >= 2)
+    const at = suf ? h.length - suf.length : -1
+    if (suf && !/[A-Z_.\-]/.test(h[at]) && !/[_.\-]/.test(h[at - 1])) h = `${h.slice(0, at)} ${h.slice(at)}`
+  }
   h = h
     .replace(/[_.\-]+/g, ' ')
     .replace(/([a-z\d])([A-Z])/g, '$1 $2')
@@ -188,8 +196,8 @@ const letters = (s) => s.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]/g, '
 
 // How many letters of `core` (a handle, lowercased, letters only) this phrase
 // accounts for, or 0 if any word in it doesn't belong.
-export function phraseScore(words, core) {
-  let pos = 0, matched = 0
+export function phraseScore(words, core, vocab = NO_VOCAB) {
+  let pos = 0, matched = 0, specific = 0
   const significant = words.filter((w) => !CONNECTORS.has(w.toLowerCase()))
   if (!significant.length || STOP_STARTS.has(words[0].toLowerCase())) return 0
   for (const w of words) {
@@ -199,7 +207,7 @@ export function phraseScore(words, core) {
     const at = core.indexOf(lw, pos)
     if (at < 0) {
       // "Vanderbilt" for @VandyBoys: a single word whose first 4+ letters open the handle
-      if (words.length === 1 && lw.length >= 5) {
+      if (words.length === 1 && lw.length >= 5 && !vocab.isGeneric(lw)) {
         let k = 0
         while (k < lw.length && k < core.length && lw[k] === core[k]) k++
         if (k >= 4) return k * 0.5
@@ -208,14 +216,47 @@ export function phraseScore(words, core) {
     }
     pos = at + lw.length
     matched += lw.length
+    if (!vocab.isGeneric(lw)) specific += lw.length
   }
+  if (!specific) return 0 // "Baseball", "State": words half your handles share
   const isAcronym = words.length === 1 && /^[\p{Lu}\d&]{2,6}$/u.test(words[0])
-  if (matched >= 4 && matched / core.length >= 0.3) return matched
+  if (matched >= 4 && Math.min(1, matched / vocab.denominator(core)) >= 0.5) return matched
   if (isAcronym && core.startsWith(letters(words[0]))) return Math.max(matched, 3.5)
   return 0
 }
 
-export function nameFromCaptions(texts, handles) {
+const NO_VOCAB = { isGeneric: () => false, denominator: (core) => core.length, suffixes: [] }
+
+// What counts as "generic" depends on the account: for a baseball outlet it's
+// "baseball", "bsb", "state"; for a music brand it'd be "music", "records".
+// A word is generic when it shows up inside many of the handles you tag.
+export function handleVocabulary(raws) {
+  const cores = [...new Set(raws.filter((h) => h && !isBracket(h)).map((h) => letters(h.replace(/^@/, '').split('@')[0])))].filter((c) => c.length >= 3)
+  const threshold = Math.max(3, Math.ceil(cores.length * 0.04))
+  const suffixCount = new Map()
+  for (const c of cores) for (let L = 3; L <= 10 && L <= c.length - 2; L++) {
+    const x = c.slice(-L)
+    suffixCount.set(x, (suffixCount.get(x) || 0) + 1)
+  }
+  const suffixes = [...suffixCount].filter(([, n]) => n >= threshold).map(([x]) => x).sort((a, b) => b.length - a.length)
+  const cache = new Map()
+  const isGeneric = (w) => {
+    if (w.length < 3) return false
+    if (!cache.has(w)) {
+      let n = 0
+      for (const c of cores) if (c.includes(w) && ++n >= threshold) break
+      cache.set(w, n >= threshold)
+    }
+    return cache.get(w)
+  }
+  const denominator = (core) => {
+    const suf = suffixes.find((x) => core.endsWith(x) && core.length - x.length >= 2)
+    return Math.max(2, core.length - (suf ? suf.length : 0))
+  }
+  return { isGeneric, denominator, suffixes }
+}
+
+export function nameFromCaptions(texts, handles, vocab = NO_VOCAB) {
   const cores = [...new Set(handles
     .filter((h) => h && !isBracket(h))
     .map((h) => letters(h.replace(/^@/, '').split('@')[0])))]
@@ -228,7 +269,7 @@ export function nameFromCaptions(texts, handles) {
       for (let i = 0; i < run.length; i++) {
         for (let j = i + 1; j <= Math.min(run.length, i + 5); j++) {
           const words = run.slice(i, j)
-          const score = Math.max(...cores.map((c) => phraseScore(words, c)))
+          const score = Math.max(...cores.map((c) => phraseScore(words, c, vocab)))
           if (!score) continue
           const phrase = words.join(' ')
           const k = phrase.toLowerCase()
@@ -328,9 +369,11 @@ export function buildDirectory(posts, channels, { linkWindowSeconds = 180, dueWi
   }
   for (const keys of byText.values()) {
     for (let i = 0; i < keys.length; i++) for (let j = i + 1; j < keys.length; j++) {
-      if (nodes.get(keys[i]).family !== nodes.get(keys[j]).family) addEdge(keys[i], keys[j], 1)
+      if (nodes.get(keys[i]).family !== nodes.get(keys[j]).family) addEdge(keys[i], keys[j], 3)
     }
   }
+
+  const vocab = handleVocabulary([...nodes.values()].map((n) => topVariant(n)))
 
   // 4. Merge, strongest evidence first. An entity holds at most one handle per
   //    network, so a link that would put two Facebook pages on one entity is
@@ -372,9 +415,9 @@ export function buildDirectory(posts, channels, { linkWindowSeconds = 180, dueWi
       total += n.count
       lastUsed = Math.max(lastUsed, n.lastUsed)
     }
-    const fromCaptions = nameFromCaptions(members.flatMap((n) => n.texts), Object.values(handles))
+    const fromCaptions = nameFromCaptions(members.flatMap((n) => n.texts), Object.values(handles), vocab)
     const nameHandle = FAMILY_ORDER.map((f) => handles[f]).find((h) => h && nameFromHandle(h))
-    const name = fromCaptions?.name || (nameHandle ? nameFromHandle(nameHandle) : '')
+    const name = fromCaptions?.name || (nameHandle ? nameFromHandle(nameHandle, vocab) : '')
     const entity = {
       id: stableId(keys),
       name: name || `${FAMILY_LABEL[members[0].family] || members[0].family} account ${shortRaw(handles[members[0].family])}`,
@@ -394,6 +437,7 @@ export function buildDirectory(posts, channels, { linkWindowSeconds = 180, dueWi
     entities.push(entity)
   }
   for (const c of conflicts) {
+    if (c.w < 2 && !isBracket(rawOf(nodes, c.a)) && !isBracket(rawOf(nodes, c.b))) continue
     const A = entityOfKey.get(c.a), B = entityOfKey.get(c.b)
     if (!A || !B || A === B) continue
     A.conflicts.push({ withId: B.id, withName: B.name, handle: rawOf(nodes, c.b), times: c.w })
@@ -450,22 +494,23 @@ export function alignMentions(A, B) {
   const ca = A.mentions.map((m) => ctx(ta, m))
   const cb = B.mentions.map((m) => ctx(tb, m))
   const sameCount = A.mentions.length === B.mentions.length
+  const single = A.mentions.length === 1 && B.mentions.length === 1
   const scored = []
   A.mentions.forEach((ma, i) => B.mentions.forEach((mb, j) => {
     let shared = 0
     for (const w of ca[i]) if (cb[j].has(w)) shared++
     let score = shared
-    if (sameCount && i === j) score += 1
+    if (sameCount && i === j && !single) score += 1
+    if (single) score += 1
     const plainA = ma.raw.toLowerCase().replace(/^@/, ''), plainB = mb.raw.toLowerCase().replace(/^@/, '')
     if (!isBracket(ma.raw) && plainA === plainB) score += 5
     scored.push({ i, j, score })
   }))
   scored.sort((x, y) => y.score - x.score)
   const usedA = new Set(), usedB = new Set(), pairs = []
-  const single = A.mentions.length === 1 && B.mentions.length === 1
   for (const s of scored) {
     if (usedA.has(s.i) || usedB.has(s.j)) continue
-    if (s.score < (single ? 1 : 2)) continue
+    if (s.score < 2) continue
     usedA.add(s.i); usedB.add(s.j)
     pairs.push([A.mentions[s.i], B.mentions[s.j]])
   }
