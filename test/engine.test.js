@@ -129,8 +129,9 @@ test('helpers', () => {
 })
 
 test('names come from the captions, not just the handle', async () => {
-  const { nameFromCaptions } = await import('../public/engine.js')
-  const n = (texts, handles) => nameFromCaptions(texts, handles)?.name
+  const { nameFromCaptions, handleVocabulary } = await import('../public/engine.js')
+  const vocab = handleVocabulary(['@SouthAlabamaBSB', '@LSUBaseball', '@OleMissBSB', '@GoBearcatsBASE', '@AggieBaseball', '@OhioStateBASE', '@TexasBaseball', '@AuburnBaseball', '@GatorsBB', '@AlabamaBSB', '@DukeBASE', '@ClemsonBaseball'])
+  const n = (texts, handles) => nameFromCaptions(texts, handles, vocab)?.name
   assert.equal(n(['🆕 2025 Fall Report: South Alabama\n\n@SouthAlabamaBSB’s roster looks improved this fall.'], ['@SouthAlabamaBSB']), 'South Alabama')
   assert.equal(n(['Big weekend in the SEC. LSU heads to Ole Miss. @LSUBaseball @OleMissBSB'], ['@LSUBaseball', '@lsubaseball']), 'LSU')
   assert.equal(n(['Big weekend in the SEC. LSU heads to Ole Miss. @LSUBaseball @OleMissBSB'], ['@OleMissBSB']), 'Ole Miss')
@@ -161,4 +162,17 @@ test('words most of your handles share never become a name', async () => {
   assert.equal(nameFromCaptions(['Miami walks it off! @CanesBaseball'], ['@CanesBaseball'], vocab), null)
   assert.equal(nameFromHandle('@ucdavisbaseball', vocab), 'Ucdavis Baseball')
   assert.equal(nameFromHandle('@AuburnBaseball', vocab), 'Auburn Baseball')
+})
+
+test('rejects partial and accidental names', async () => {
+  const { nameFromCaptions, handleVocabulary } = await import('../public/engine.js')
+  const vocab = handleVocabulary(['@UCSB_Baseball', '@UNCWBaseball', '@MiamiOHBaseball', '@RutgersBaseball', '@MoStateBSB', '@TheNECBL', '@LSUBaseball', '@TexasBaseball', '@OleMissBSB', '@AuburnBaseball', '@GatorsBB'])
+  const n = (t, h) => nameFromCaptions([t], [h], vocab)?.name
+  assert.equal(n('Then the NECBL season begins. @TheNECBL', '@TheNECBL'), undefined)
+  assert.equal(n('UC Santa Barbara wins. UC rolls @UCSB_Baseball', '@UCSB_Baseball'), undefined)
+  assert.equal(n('UNC Wilmington rolls. @UNCWBaseball', '@UNCWBaseball'), undefined)
+  assert.equal(n('Miami (OH) takes the series. @MiamiOHBaseball', '@MiamiOHBaseball'), undefined)
+  assert.equal(n('Rutgers A strong start @RutgersBaseball', '@RutgersBaseball'), 'Rutgers')
+  assert.equal(n('Missouri State takes game one. @MoStateBSB', '@MoStateBSB'), undefined)
+  assert.equal(n('LSU wins. @LSUBaseball', '@LSUBaseball'), 'LSU')
 })

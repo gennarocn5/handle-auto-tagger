@@ -160,6 +160,11 @@ export function nameFromHandle(raw, vocab = null) {
 
 const CONNECTORS = new Set(['of', 'and', '&', 'de', 'la', 'del', 'da', 'du', 'van', 'von', 'the'])
 const STOP_STARTS = new Set(['the', 'a', 'an', 'and', 'of'])
+// Capitalized because they start a sentence, not because they're names.
+const COMMON = new Set(('a an and are as at be big but by can congrats day do final for from game get go great happy has have here how ' +
+  'i if in is it its just last let live make more new next no not now of on one our out over see so that the their then there these they ' +
+  'this time to today tonight top up we week what when where who why will win with you your best first huge watch read full report ' +
+  'via thanks thank join check welcome good back all after before about breaking').split(' '))
 
 function phraseRuns(text) {
   const clean = (text || '')
@@ -200,11 +205,15 @@ export function phraseScore(words, core, vocab = NO_VOCAB) {
   let pos = 0, matched = 0, specific = 0
   const significant = words.filter((w) => !CONNECTORS.has(w.toLowerCase()))
   if (!significant.length || STOP_STARTS.has(words[0].toLowerCase())) return 0
+  if (significant.some((w) => letters(w).length < 2)) return 0 // "Rutgers A"
+  if (significant.every((w) => COMMON.has(w.toLowerCase()))) return 0 // "Then", "Big Day"
+  let first = -1
   for (const w of words) {
     const lw = letters(w)
     if (!lw) continue
     if (CONNECTORS.has(w.toLowerCase())) { const at = core.indexOf(lw, pos); if (at >= 0) { pos = at + lw.length; matched += lw.length } continue }
     const at = core.indexOf(lw, pos)
+    if (at >= 0 && first < 0) first = at
     if (at < 0) {
       // "Vanderbilt" for @VandyBoys: a single word whose first 4+ letters open the handle
       if (words.length === 1 && lw.length >= 5 && !vocab.isGeneric(lw)) {
@@ -219,9 +228,12 @@ export function phraseScore(words, core, vocab = NO_VOCAB) {
     if (!vocab.isGeneric(lw)) specific += lw.length
   }
   if (!specific) return 0 // "Baseball", "State": words half your handles share
+  if (first > 2) return 0 // names lead the handle: "State" isn't @MoStateBSB
+  const denom = vocab.denominator(core)
   const isAcronym = words.length === 1 && /^[\p{Lu}\d&]{2,6}$/u.test(words[0])
-  if (matched >= 4 && Math.min(1, matched / vocab.denominator(core)) >= 0.5) return matched
-  if (isAcronym && core.startsWith(letters(words[0]))) return Math.max(matched, 3.5)
+  // An abbreviation has to be the whole distinctive part: LSU = @LSUBaseball, but UNC ≠ @UNCWBaseball
+  if (isAcronym) return core.startsWith(letters(words[0])) && letters(words[0]).length >= denom ? Math.max(matched, 3.5) : 0
+  if (matched >= 4 && matched / denom >= 0.75) return matched // Miami ≠ @MiamiOHBaseball
   return 0
 }
 
