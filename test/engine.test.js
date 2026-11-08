@@ -185,3 +185,22 @@ test('handle fallback splits on whole-word endings', async () => {
   assert.equal(nameFromHandle('@MizzouBaseball', vocab), 'Mizzou Baseball')
   assert.equal(nameFromHandle('@ucdavisbaseball', vocab), 'Ucdavis Baseball')
 })
+
+test('explicit @ tags apply across networks', () => {
+  const { entities } = buildDirectory(posts, channels)
+  const om = entities.find((e) => e.handles.x === '@OleMissBSB')
+  om.name = 'Ole Miss'
+  const ku = entities.find((e) => e.handles.x === '@KUBaseball')
+  ku.name = 'Kansas'
+  const m = buildMatcher(entities, { matchCase: true })
+  const text = 'Big one: @Ole Miss hosts @kubaseball. Email tips@ole.com, ole miss fans.'
+  const matches = m.find(text)
+  assert.deepEqual(matches.map((x) => [x.text, x.explicit || false]), [['@Ole Miss', true], ['@kubaseball', true]])
+  assert.equal(renderForService(text, matches, 'twitter').output, 'Big one: @OleMissBSB hosts @KUBaseball. Email tips@ole.com, ole miss fans.')
+  assert.equal(renderForService(text, matches, 'instagram').output, 'Big one: Ole Miss hosts @kubaseball. Email tips@ole.com, ole miss fans.')
+  assert.equal(renderForService(text, matches, 'facebook').output, 'Big one: Ole Miss hosts @[71601871618]. Email tips@ole.com, ole miss fans.')
+  // untagging an explicit tag leaves the readable name
+  assert.equal(renderForService(text, matches, 'twitter', new Set([ku.id])).output, 'Big one: @OleMissBSB hosts Kansas. Email tips@ole.com, ole miss fans.')
+  // one letter after @ is enough to suggest
+  assert.equal(suggest(entities, '@o')[0].id, om.id)
+})

@@ -183,7 +183,11 @@ table.dir { border-collapse: collapse; width: 100%; font-size: .88rem; }
 .suggest li { padding: 7px 9px; border-radius: 7px; cursor: pointer; display: grid; gap: 2px; }
 .suggest li[aria-selected="true"] { background: var(--accent-soft); }
 .suggest li b { font-weight: 600; }
-.suggest li span { font: .78rem var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.suggest li .hs { display: flex; flex-wrap: wrap; gap: 2px 10px; }
+.suggest li .sh { font: .76rem var(--mono); color: var(--muted); display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.suggest li .sh .net { font-size: 0; gap: 0; }
+.suggest li .sh.none { font-family: var(--body); font-style: italic; }
+.suggest { max-width: 420px; }
 .tagged .chip { border-color: var(--tag); background: var(--tag-soft); color: var(--ink); }
 .tagged .chip.off { background: transparent; border-color: var(--line-2); color: var(--muted); text-decoration: line-through; }
 .tagged .chip .x { color: var(--muted); }

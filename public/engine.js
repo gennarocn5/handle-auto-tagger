@@ -606,8 +606,13 @@ function escapeRe(s) {
 }
 
 // Builds a matcher for every name and alias in the directory.
+// Two ways to tag in a caption:
+//   implicit  "Ole Miss heads to LSU"   names and aliases, found automatically
+//   explicit  "@Ole Miss" or "@OleMissBSB"   an @ plus a name, alias or any
+//             known handle: always a tag, whatever the capitalization setting
 export function buildMatcher(entities, { matchCase = false } = {}) {
-  const lookup = new Map()
+  const lookup = new Map()   // implicit term → entity
+  const explicit = new Map() // lowercased "@term" → entity
   for (const e of entities) {
     if (e.deleted) continue
     for (const term of [e.name, ...(e.aliases || [])]) {
@@ -615,22 +620,50 @@ export function buildMatcher(entities, { matchCase = false } = {}) {
       if (t.length < 2) continue
       const k = matchCase ? t : t.toLowerCase()
       if (!lookup.has(k)) lookup.set(k, e)
+      const x = `@${t.toLowerCase()}`
+      if (!explicit.has(x)) explicit.set(x, e)
+    }
+    for (const h of Object.values(e.handles || {})) {
+      if (!h || isBracket(h)) continue
+      const x = h.toLowerCase()
+      if (!explicit.has(x)) explicit.set(x, e)
     }
   }
-  const terms = [...lookup.keys()].sort((a, b) => b.length - a.length)
-  if (!terms.length) return { find: () => [], lookup }
-  const re = new RegExp(`(?<![\\p{L}\\p{N}_@])(${terms.map(escapeRe).join('|')})(?![\\p{L}\\p{N}_])`, matchCase ? 'gu' : 'giu')
+  const alt = (keys) => [...keys].sort((a, b) => b.length - a.length).map(escapeRe).join('|')
+  const implicitRe = lookup.size
+    ? new RegExp(`(?<![\\p{L}\\p{N}_@])(${alt(lookup.keys())})(?![\\p{L}\\p{N}_])`, matchCase ? 'gu' : 'giu')
+    : null
+  const explicitRe = explicit.size
+    ? new RegExp(`(?<![\\p{L}\\p{N}_@./])(${alt(explicit.keys())})(?![\\p{L}\\p{N}_])`, 'giu')
+    : null
   return {
     lookup,
+    explicit,
     find(text) {
-      const out = []
-      for (const m of text.matchAll(re)) {
-        const e = lookup.get(matchCase ? m[1] : m[1].toLowerCase())
-        if (e) out.push({ index: m.index, end: m.index + m[1].length, text: m[1], entity: e })
+      const found = []
+      if (explicitRe) for (const m of text.matchAll(explicitRe)) {
+        const e = explicit.get(m[1].toLowerCase())
+        if (e) found.push({ index: m.index, end: m.index + m[1].length, text: m[1], entity: e, explicit: true })
       }
+      if (implicitRe) for (const m of text.matchAll(implicitRe)) {
+        const e = lookup.get(matchCase ? m[1] : m[1].toLowerCase())
+        if (e) found.push({ index: m.index, end: m.index + m[1].length, text: m[1], entity: e })
+      }
+      found.sort((a, b) => a.index - b.index || b.end - a.end)
+      const out = []
+      let last = -1
+      for (const f of found) if (f.index >= last) { out.push(f); last = f.end }
       return out
     },
   }
+}
+
+// What an explicit "@Ole Miss" becomes where there's no handle to use.
+function plainName(m) {
+  if (!m.explicit) return m.text
+  const t = m.text.replace(/^@/, '')
+  // a typed handle ("@OleMissBSB") reads better as the account's name
+  return Object.values(m.entity.handles || {}).some((h) => h.toLowerCase() === m.text.toLowerCase()) ? m.entity.name : t
 }
 
 // Splits a caption into text and tag parts for one network.
@@ -642,12 +675,12 @@ export function renderForService(text, matches, service, skip = new Set()) {
   for (const m of matches) {
     if (m.index < last) continue
     parts.push({ text: text.slice(last, m.index) })
-    if (skip.has(m.entity.id)) parts.push({ text: m.text })
+    if (skip.has(m.entity.id)) parts.push({ text: plainName(m) })
     else {
       const handle = m.entity.handles[family]
       parts.push(handle
         ? { tag: true, text: handle, label: isBracket(handle) ? m.entity.name : handle, entity: m.entity }
-        : { missing: true, text: m.text, entity: m.entity })
+        : { missing: true, text: plainName(m), entity: m.entity })
     }
     last = m.end
   }
@@ -661,7 +694,7 @@ export function renderForService(text, matches, service, skip = new Set()) {
 // Autocomplete: entities whose name, alias or handle starts with the fragment.
 export function suggest(entities, fragment, limit = 7) {
   const q = fragment.replace(/^@/, '').toLowerCase()
-  if (q.length < 2) return []
+  if (q.length < (fragment.startsWith('@') ? 1 : 2)) return []
   const scored = []
   for (const e of entities) {
     if (e.deleted) continue

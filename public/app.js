@@ -379,7 +379,7 @@ function exportCSV() {
 let matcher = null
 let matcherFor = null
 function getMatcher() {
-  const key = `${S.dir?.scannedAt}|${entities().length}|${$('#match-case').checked}|${entities().map((e) => e.name + (e.aliases || []).join()).join('|').length}`
+  const key = `${S.dir?.scannedAt}|${entities().length}|${$('#match-case').checked}|${entities().map((e) => e.name + (e.aliases || []).join() + Object.values(e.handles).join()).join('|')}`
   if (matcherFor !== key) { matcher = buildMatcher(entities(), { matchCase: $('#match-case').checked }); matcherFor = key }
   return matcher
 }
@@ -477,7 +477,7 @@ function fragmentAtCaret(ta) {
   for (let i = 0; i < parts.length; i++) {
     const frag = parts.slice(i).join(' ')
     const items = suggest(entities(), frag)
-    if (items.length && (frag.startsWith('@') || frag.length >= 2)) return { frag, start: pos - frag.length, items }
+    if (items.length) return { frag, start: pos - frag.length, items }
   }
   return null
 }
@@ -486,11 +486,15 @@ function updateSuggest() {
   const ta = $('#caption'), box = $('#suggest')
   const hit = fragmentAtCaret(ta)
   // don't nag once the fragment is already an exact, matched name
-  if (!hit || hit.items.some((e) => e.name.toLowerCase() === hit.frag.toLowerCase())) { box.hidden = true; ac.items = []; return }
-  ac.items = hit.items; ac.index = 0; ac.start = hit.start
+  const bare = hit?.frag.replace(/^@/, '').toLowerCase()
+  if (!hit || (!hit.frag.startsWith('@') && hit.items.some((e) => e.name.toLowerCase() === bare))) { box.hidden = true; ac.items = []; return }
+  ac.items = hit.items; ac.index = 0; ac.start = hit.start; ac.at = hit.frag.startsWith('@')
+  const fams = new Set(S.channels.filter((c) => S.sendTo.has(c.id)).map((c) => familyOf(c.service)))
   box.innerHTML = hit.items.map((e, i) => {
-    const hs = FAMILY_ORDER.filter((f) => e.handles[f]).slice(0, 3).map((f) => displayHandle(e.handles[f])).join(' · ')
-    return `<li role="option" data-i="${i}" aria-selected="${i === 0}"><b>${esc(e.name)}</b><span>${esc(hs)}</span></li>`
+    const hs = FAMILY_ORDER.filter((f) => e.handles[f] && (!fams.size || fams.has(f)))
+      .map((f) => `<span class="sh"><i class="net ${esc(f)}"></i>${esc(displayHandle(e.handles[f]))}</span>`).join('')
+    const missing = [...fams].filter((f) => !e.handles[f]).map((f) => FAMILY_LABEL[f] || f)
+    return `<li role="option" data-i="${i}" aria-selected="${i === 0}"><b>${esc(e.name)}</b><div class="hs">${hs}${missing.length ? `<span class="sh none">no ${esc(missing.join(', '))}</span>` : ''}</div></li>`
   }).join('')
   const { top, left } = caretXY(ta, hit.start)
   box.style.top = `${top}px`
@@ -503,7 +507,7 @@ function accept(i = ac.index) {
   if (!e) return
   const ta = $('#caption')
   const end = ta.selectionStart
-  const insert = e.name + (/^\s/.test(ta.value.slice(end)) ? '' : ' ')
+  const insert = (ac.at ? '@' : '') + e.name + (/^\s/.test(ta.value.slice(end)) ? '' : ' ')
   ta.setRangeText(insert, ac.start, end, 'end')
   S.skip.delete(e.id)
   $('#suggest').hidden = true; ac.items = []
